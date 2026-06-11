@@ -111,10 +111,38 @@ sys_flip_display(void)
 //   Pass 0 to let the kernel auto-select the next available VA above p->sz.
 //
 // Returns the mapped virtual address on success, (uint64)-1 on failure.
-//
-// TODO: Students implement this syscall.
 uint64
 sys_map_display(void)
 {
-  return -1;
+  uint64 addr;
+  argaddr(0, &addr);
+  struct proc *p = myproc();
+
+  // One mapping per process — prevents orphaned PTEs that would panic freewalk.
+  if (p->fb_map_va != 0)
+    return -1;
+
+  uint64 va;
+  if (addr == 0) {
+    // Place just below the trapframe — far above any realistic heap.
+    // Avoids collision with upward heap growth from sbrk/malloc.
+    va = TRAPFRAME - (uint64)GPU_FB_PAGES * PGSIZE;
+  } else {
+    if (addr % PGSIZE != 0)
+      return -1;
+    va = addr;
+  }
+
+  // Verify no existing valid PTE overlaps [va, va + GPU_FB_PAGES*PGSIZE)
+  for (int i = 0; i < GPU_FB_PAGES; i++) {
+    pte_t *pte = walk(p->pagetable, va + (uint64)i * PGSIZE, 0);
+    if (pte && (*pte & PTE_V))
+      return -1;
+  }
+
+  if (virtio_gpu_map_fb(p->pagetable, va) != 0)
+    return -1;
+
+  p->fb_map_va = va;
+  return va;
 }

@@ -158,9 +158,15 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable)
+  if(p->pagetable) {
+    // Remove GPU framebuffer mapping before freewalk() sees it.
+    // do_free=0: these are kernel-owned pages, never freed by the process.
+    if(p->fb_map_va != 0)
+      uvmunmap(p->pagetable, p->fb_map_va, GPU_FB_PAGES, 0);
     proc_freepagetable(p->pagetable, p->sz);
+  }
   p->pagetable = 0;
+  p->fb_map_va = 0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;

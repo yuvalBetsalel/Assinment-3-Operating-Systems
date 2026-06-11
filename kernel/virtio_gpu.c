@@ -548,6 +548,24 @@ void virtio_gpu_commit(void)
     gpu_transfer_flush();
 }
 
+// ── Public: map the kernel framebuffer pages into a user page table ───
+// Maps all GPU_FB_PAGES pages from fb[] at virtual address va in pt,
+// with PTE_U|PTE_R|PTE_W.  On partial failure, unmaps what was installed
+// and returns -1.  Returns 0 on success.
+int
+virtio_gpu_map_fb(pagetable_t pt, uint64 va)
+{
+    for (int i = 0; i < GPU_FB_PAGES; i++) {
+        if (mappages(pt, va + (uint64)i * PGSIZE, PGSIZE,
+                     (uint64)fb[i], PTE_U | PTE_R | PTE_W) != 0) {
+            if (i > 0)
+                uvmunmap(pt, va, i, 0);
+            return -1;
+        }
+    }
+    return 0;
+}
+
 // ── GPU daemon ────────────────────────────────────────────────────────
 // Kernel process started by kproc_create().  Wakes every DISPLAY_DAEMON_TICKS
 // timer ticks and issues TRANSFER_TO_HOST_2D + RESOURCE_FLUSH so that
