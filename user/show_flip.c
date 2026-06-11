@@ -201,6 +201,6 @@ int main(int argc, char *argv[])
         fprintf(2, "show_flip: flip_display failed\n");
         exit(1);
     }
-
+    sleep(50);
     exit(0);
 }

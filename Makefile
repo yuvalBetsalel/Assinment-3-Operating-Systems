@@ -137,6 +137,7 @@ UPROGS=\
 	$U/_show_map\
 	$U/_gol\
 	$U/_test_map\
+	$U/_testflip\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

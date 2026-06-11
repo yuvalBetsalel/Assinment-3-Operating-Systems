@@ -134,6 +134,11 @@ struct virtio_gpu_resource_detach_backing
 // can coexist on multi-CPU systems.
 static struct spinlock gpu_lock;
 
+// Serialises the full detach→attach sequence in virtio_gpu_flip so
+// the static entries[] array is not overwritten by a concurrent flip.
+// Must never be acquired while gpu_lock is already held.
+static struct spinlock flip_lock;
+
 static struct
 {
     struct virtq_desc *desc;
@@ -422,6 +427,7 @@ void virtio_gpu_init(void)
 {
     uint32 status = 0;
     initlock(&gpu_lock, "vgpu");
+    initlock(&flip_lock, "vgpu_flip");
 
     // ── 1. VirtIO device handshake ──────────────────────────────────────
     if (*R1(VIRTIO_MMIO_MAGIC_VALUE) != 0x74726976 ||
@@ -564,6 +570,45 @@ virtio_gpu_map_fb(pagetable_t pt, uint64 va)
         }
     }
     return 0;
+}
+
+// ── Public: zero-copy page flip ──────────────────────────────────────
+// Re-points the device backing list to the physical pages of a user
+// buffer.  pt is the calling process's page table; va is a page-aligned
+// user virtual address for a region of GPU_FB_PAGES pages that have
+// already been validated as user-accessible by the caller.
+void
+virtio_gpu_flip(pagetable_t pt, uint64 va)
+{
+    static struct virtio_gpu_mem_entry entries[GPU_FB_PAGES];
+
+    acquire(&flip_lock);
+    for (int i = 0; i < GPU_FB_PAGES; i++) {
+        entries[i].addr    = walkaddr(pt, va + (uint64)i * PGSIZE);
+        entries[i].length  = PGSIZE;
+        entries[i].padding = 0;
+    }
+    gpu_cmd_detach();
+    gpu_cmd_attach(entries, GPU_FB_PAGES);
+    release(&flip_lock);
+}
+
+// ── Public: restore the kernel framebuffer as the device backing ──────
+// Called when a process that used flip_display exits, so the GPU stops
+// reading from its (now-freed) pages and goes back to the kernel fb[].
+void
+virtio_gpu_restore_fb(void)
+{
+    static struct virtio_gpu_mem_entry entries[GPU_FB_PAGES];
+    acquire(&flip_lock);
+    for (int i = 0; i < GPU_FB_PAGES; i++) {
+        entries[i].addr    = (uint64)fb[i];
+        entries[i].length  = PGSIZE;
+        entries[i].padding = 0;
+    }
+    gpu_cmd_detach();
+    gpu_cmd_attach(entries, GPU_FB_PAGES);
+    release(&flip_lock);
 }
 
 // ── GPU daemon ────────────────────────────────────────────────────────
